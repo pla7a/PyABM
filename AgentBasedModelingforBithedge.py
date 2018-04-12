@@ -6,6 +6,7 @@ Created on Wed Apr  4 20:56:01 2018
 @author: bennett
 """
 import numpy as np
+import math
 
 
 
@@ -14,38 +15,92 @@ class BaseModel(object):
     will contain agents as well as asset prices as attributes
     and rules for moving the simulation forward in time.'''
     
-    time = 0 # A class variable for identifying what time it is in the simulation
         
 class HCModel(BaseModel):
     '''Class for simulating the HC market.'''
     
-    tot_hc = 0 # A class variable for the total number of HC in the simulation
-    tot_col = 0 # A class variable for the total collateral in the system
-
-    
     def __init__(self, btc_price, btc_vol, btc_ret):
-        self.agents=[] # A list of agents in the model
         self.btc_price = btc_price # The current BTC price
         self.btc_price_history = [btc_price] # Historical BTC prices
         self.btc_ret = btc_ret # The expected yearly returns of BTC
         self.btc_vol = btc_vol # The (current) volatility of BTC prices
-        self.hc_price = 0 # The current HC price
+        self.agents = [] # A list of agents in the model
+        self.new_agents = [] # Pre-generated agents to enter the simulation randomly
+        self.hc_price = 1 # The current HC price
         self.hc_price_history = [0]
-        self.hc_bids = [] # Bid orders for HC at this time-step
-        self.hc_offers = [] # Offer orders for HC at this time-step
+        self.hc_orders = [] # A list of open orders
+        self.hc_bids = [] # Bid orders for HC active at this time-step. Format [(agent_id, order_id), price, amount]
+        self.hc_offers = [] # Offer orders for HC active at this time-step. Format [(agent_id, order_id), price, amount]
         self.exchange_dai = 0 # Dai held by the system/exchange
         self.exchange_hc = 0 # HC held by the system/exchange
+        self.exchange_cdp = [] # A list of CDPs currently under liquidation (held by exchange)
+        self.liquidation_orders = [] # A list of HC bid orders related to liquidation process
+        self.time = 0 # Time in the simualtion
+        self.agent_count = 0 # Total number of agents ever created; used to assign agent IDs
+        self.tot_hc = 0 # Total number of HC in the simulation
+        self.tot_col = 0 # Total amount of collateral in the system (DAI)
+ 
     
     def set_btc_vol(self, vol):
-        '''function for setting the volatility of BTC.'''
+        '''function for setting the volatility of BTC. This is
+        a parameter used as the default value for updating the 
+        price of BTC via GBM.'''
+        
         self.btc_vol = vol
+
         
     def set_btc_returns(self, exp_returns):
         '''Function for setting the expected yearly returns
         of BTC.'''
+
         self.btc_ret = exp_returns
+
+
+    def agent_init_pwrlaw(alpha, nb, nh, maxwb, maxwh, p, rule, agent_list = 'agents'):
+        '''Function to initialize the model with nb BTC agents
+        and nh HC agents.  Wealth endowments are determined using
+        a pair of power law distributions using exponent alpha
+        and max wealth maxwb and maxwh respectively.  BTC agents
+        have an average proportion p of their wealth in BTC and
+        use the remainder to hedge it this exposure.
+        
+        Currently written with a single rule for all agents but 
+        this will be changed once we've written more rules.  We
+        will select from among the rules randomly in some way.'''
+        
+        agents = []
+        for i in range(nb):
+            dai = maxwb * i**(-alpha)
+            frac = min(lognormal_factor(p, 0.1), 0.9)
+            btc = dai * (1 - frac) / self.btc_price
+            dai = dai * frac
+            agent = BTCAgent(dai, btc, 0, self, rule, self.agent_count+1)
+            agents.append(agent)
+            self.agent_count += 1
+        for i in range(nh):
+            dai = maxwh * i**(-alpha)
+            agent = HCAgent(dai, 0, self,rule, self.agent_count+1)
+            agents.append(agent)
+            self.agent_count += 1
+        setattr(self, agent_list, agents)
+       
+
+    def submit_order(self, order):
+        '''Function that takes an order object and submits it to the model,
+        updating the order book and list of bid/offer prices accordingly.'''
+        
+        otype = order.otype
+        if otype == 'Bid':
+            self.hc_orders.append(order)
+            self.hc_bids.append(order.id, order.price, order.amount)
+        elif otype == 'Offer':
+            self.hc_orders.append(order)
+            self.hc_offers.append(order.id, order.price, order.amount)
+        else:
+            raise ValueError('Unrecognized order type. Neither Bid nor Offer')
     
-    def btc_update_gbm(self, ret, vol, dt, price):
+    
+    def btc_update_gbm(self, ret=self.btc_ret, vol=self.btc_vol, dt):
         '''Function for updating the BTC price according to 
         geometric Brownian motion.  Uses Euler-Maruyama method
         for comparison to more complicated update rules for which
@@ -55,14 +110,14 @@ class HCModel(BaseModel):
             ret - expected yearly return of BTC expressed as decimal (float)
             vol - yearly volatility of BTC expressed as decimal (float)
             dt -  time increment expressed as fraction of a year (float)
-            price - current price of BTC
         '''
         
         w = np.random.normal(0, dt)
         self.btc_price = self.btc_price * (1 + ret * dt +vol *w)
         self.btc_price_history.append(self.btc_price)
+
         
-    def debt_updates_rule1(self, btc_price_history):
+    def debt_updates_rule1(self):
         '''Function for updating the debt owed by all CDPs according to 
         our first proposed dynamic debt rule:
             D(t) = P(t0) * D(t0) / P(t) 
@@ -74,17 +129,20 @@ class HCModel(BaseModel):
         
         for agent in self.agents:
             for cdp in agent.debts:
-                cdp.debt = cdp.debt * btc_price_history[-2]/btc_price_history[-1]
+                cdp.debt = cdp.debt * self.btc_price_history[-2]/self.btc_price_history[-1]
+
                 
-    def bid_hc(self, amt, price):
-        '''Function to submit bids for HC. Requires number of HC 
-        desired and at what price price.'''
+    # Every round, need to:
+    #   1.) Check each CDP for liquidation condition
+    #       1a.) Place HC bids to liquidate any violated CDPs
+    #       1b.) Pay off CDPs and return unused collateral (if any)
 
-    def offer_hc(self, amt, price):
-        '''Function to submit offers for HC.  Requires number of
-        HC offered and at what price.'''
+    
+    def liquid_check(self):
+        '''Function to check all active CDPs for liquidation. For all 
+        CDPs that meet liquidation condition, send HC bids '''
 
-
+    
 
 class BaseAgent(object):
     '''Base class for agents that will participate in the market.
@@ -92,32 +150,37 @@ class BaseAgent(object):
     the classes of particular types of agents but assets and actions
     shared by all relevant agents will be put here for convenience.'''
 
-    def __init__(self, dai, hc, model, rule):
+    def __init__(self, dai, hc, model, rule, id_num):
         self.dai = dai # Asset: Stable currency for use as collateral
         self.hc = hc # Asset: HC used to hedge BTC position
         self.model = model # The model to which this agent belongs
-        self.debts = [] # A list of HC denominated debts in sublists of (HC debt, collateral, creation time)
-        self.orders = [] # A list of current and previous orders
+        self.id = id_num # Identification number for the agent
         self.rule = rule # A rule object that takes agent and model variables as inputs and outputs a (possibly empty) order
-        
+        self.orders = [] # A list of current and previous orders
+        self.order_count = 0 # Number of orders placed.  Used to assign order ID number
+       
 
 class HCAgent(BaseAgent):
     '''This class is for speculators who will trade HC and Dai 
     on the market in order to make a profit.  They can also print
     HC with a CDP.'''
     
-    def __init__(self, dai, hc, model, rule):
-        BaseAgent.__init__(self, dai, hc, model, rule)
+    def __init__(self, dai, hc, model, rule, id_num):
+        BaseAgent.__init__(self, dai, hc, model, rule, id_num)
+        self.debts = [] # A list of active CDPs attached to this agent
+        self.cdp_count = 0 # Number of CDPs every used by this agent.  Used to assign CDP ID number
     
     def print_hc(self, collat, hc_amt, time):
         '''Function for borrowing HC via a CDP'''
-        cdp = CDP(hc_amt, collat, time)
+        cdp_id = (self.id_num, cdp_count)
+        cdp = CDP(self, hc_amt, collat, time, cdp_id)
+        self.cdp_count += 1
         self.dai = self.dai - collat
         self.hc += hc_amt
         self.debts.append(cdp) 
     
     def add_collateral(self, dai):
-        '''Function to add collateral in dai to a particular CDP.'''
+        '''Function to add collateral in DAI to a particular CDP.'''
         cdp = self.debts[debt_num]
         self.dai = self.dai - dai
         cdp.collat += dai
@@ -126,14 +189,16 @@ class HCAgent(BaseAgent):
         '''Function to repay debts, oldest first, up to a given amount
         of HC.'''
         
-    def repay_debt(self, hc, debt_num):
+    def repay_debt(self, hc, cdp_id):
         '''Function to repay a particular debt by its index in the debts list.'''
-        cdp = self.debts[debt_num]
-        self.hc = self.hc - hc
-        cdp.debt = cdp.debt - hc
-        if cdp.debt == 0:
-            self.dai += cdp.collat # Return collateral
-            del self.debts[debt_num] # Remove any cleared debts
+        for cdp in self.debts:
+            if cdp.id == cdp_id:
+                self.hc -= hc
+                cdp.debt -= hc
+                if cdp.debt == 0:
+                    self.dai += cdp.collat # Return collateral
+                    self.debts.remove(cdp) # Remove any cleared debts
+                break
 
 
 
@@ -147,8 +212,8 @@ class BTCAgent(BaseAgent):
     wish to hedge their BTC positions, they don't print HC
     and won't need any CDP-related functions.'''
     
-    def __init__(self, dai, btc, hc, model, rule):
-        BaseAgent.__init__(self, dai, hc, model, rule)
+    def __init__(self, dai, btc, hc, model, rule, id_num):
+        BaseAgent.__init__(self, dai, hc, model, rule, id_num)
         self.btc = btc # Asset: BTC to be hedged
  
 
@@ -158,11 +223,12 @@ class Order(object):
     '''Class for bid/offer orders.  Will only be for HC market at 
     first but could be extended.'''
     
-    def __init__(self, otype, price, amount, time):
+    def __init__(self, otype, price, amount, time, id_num):
         self.otype = otype
         self.price = price
         self.amount = amount
         self.time = time
+        self.id = id_num # Format (Agent ID, Order ID)
         self.filled = False
 
 class CDP(object):
@@ -171,22 +237,23 @@ class CDP(object):
     rate = 0.01 # A class variable for the interest rate on CDP debt (won't be used for first approximation simulations)
     lratio = 1.3 # A class variable for the liquidation ratio.  When collat < debt * lratio, we liquidate the CDP
     
-    def __init__(self, debt, collateral, creation_time):
-        self.debt = debt
-        self.collat = collateral
-        self.time = creation_time
+    def __init__(self, agent, debt, collateral, creation_time, id_num):
+        self.agent = agent # Agent that owns this CDP
+        self.debt = debt # Debt in HC to free the collateral in this CDP
+        self.collat = collateral # Collateral in DAI that secures this CDP
+        self.time = creation_time 
+        self.id = id_num # Format (Agent_ID, CDP_ID)
 
 
 class Rule(object):
     '''Class for Rule objects that will have data as attributes
     and decision making methods that output orders.'''
     
-    def __init__(self, data, agent):
-        self.data = data # A list containing all relevant data for a particular rule
+    def __init__(self, agent):
         self.agent = agent # Agent object that follows this rule
 
-    
-    def example_rule(self, thr=0.1, per=2880, p=0.25, t=5760, tvol=):
+
+    def chartist1(self, thr=0.1, per=2880, p=0.25, t=5760, tvol=10):
         '''An example rule for illustration.  For this rule, data will be a list of
         price history of BTC and the buy/sell signal will be a slope in the recent price history.
         Details of this rule are taken from:
@@ -198,16 +265,18 @@ class Rule(object):
             per - period of time over which to observe for the signal
             p - Probability of placing an order given some conditional
             t - Minimum time to wait between placing orders (time to wait for a new signal)
+            tvol - Time period over which the agent calculates an empirical volatility for BTC
             
         Default values for time args chosen with units of minutes in mind:
             per defaults to 2 days
             t defaults to 4 days
             '''
+            
         dat = self.data # Assume data is a list of BTC price history
         dat = self.agent.model.btc_price_history
         prices = dat[-per:-1] # Price over the last per time periods
         emp_vol = np.std(dat[-tvol: -1]) # Empirical volatility of BTC over last tvol time periods
-        times = range(per)
+        times = list(range(per))
         reg = np.polyfit(prices, times, 1)
         slope = per * reg[0] # Average change in price every per periods of time by linear regression
         lst_ord = self.agent.orders[-1] # The previous order placed by this agent
@@ -215,34 +284,43 @@ class Rule(object):
         wait = ctime - lst_ord.time
         roll = np.random.binomial(1, p)
         last_price = self.agent.model.hc_price_history[-1]
+        ord_id = (self.agent.id, self.agent.order_count)
         if (slope > thr) & (wait > t) & (roll == 1):
             # Some code to place a buy order (send bid to order book)
-            bid = last_price * np.random.normal(1.02, emp_vol) # The following is uggested by Cocco et al.
-            beta = np.random.lognormal(0.25, 0.2) 
+            bid = last_price * np.random.normal(1.02, emp_vol) # The following is suggested by Cocco et al.
+            beta = self.lognormal_factor(0.25, 0.2)
             amt = self.agent.dai * beta / self.agent.model.hc_price
-            order = Order('Bid', bid, amt, ctime)
+            order = Order('Bid', bid, amt, ctime, ord_id)
+            self.agent.orders.append(order)
+            self.agent.model.submit_order(order)
+            self.agent.order_count += 1
         elif (slope < -thr) & (wait > t) & (roll == 1):
             # Some code to place a sell order (send offer to order book)
             offer = last_price / np.random.normal(1.02, emp_vol) 
-            beta = np.random.lognormal(0.25, 0.2)
+            beta = self.lognormal_factor(0.25, 0.2)
             amt = self.agent.hc * beta 
-            order = Order('Offer', offer, amt, ctime)
+            order = Order('Offer', offer, amt, ctime, ord_id)
+            self.agent.orders.append(order)
+            self.agent.model.submit_order(order)
+            self.agent.order_count += 1
         else:
             order = None
             
-            
-        
-        
-
-
-
-
       
+
+
+
+def lognormal_factor(mean, std):
+    '''An auxilliary function to generate factors from a lognormal distribution.
+    output maxes at 1.'''
+    
+    mu = math.log(mean / math.sqrt(1+(std / mean) ** 2))
+    sig = math.sqrt(math.log(1+(std / mean) ** 2))
+    beta = np.random.lognormal(mu, sig)
+    beta = min(beta, 1)
+    return beta
         
         
-
-
-
 
 
 
