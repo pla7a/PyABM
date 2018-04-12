@@ -163,7 +163,7 @@ class BaseAgent(object):
 class HCAgent(BaseAgent):
     '''This class is for speculators who will trade HC and Dai 
     on the market in order to make a profit.  They can also print
-    HC with a CDP.'''
+    HC with a CDP.  Random HC traders will be implemented here also.'''
     
     def __init__(self, dai, hc, model, rule, id_num):
         BaseAgent.__init__(self, dai, hc, model, rule, id_num)
@@ -253,7 +253,45 @@ class Rule(object):
         self.agent = agent # Agent object that follows this rule
 
 
-    def chartist1(self, thr=0.1, per=2880, p=0.25, t=5760, tvol=10):
+    def random_trader(self, q=0.25, p=0.1, t=5760, tvol=10):
+        '''A simple rule for random trading on the HC market
+        
+        Args:
+            q - The average proportion of wealth to trade
+            p - Probability of trading
+            t - Minimum time to wait between placing orders
+            tvol - Time period over which to calculate empirical vol of BTC
+        '''
+        
+        dat = self.agent.model.btc_price_history
+        emp_vol = np.std(dat[-tvol:-1])
+        ctime = self.agent.model.time
+        lst_ord = self.agent.orders[-1]
+        wait = ctime = lst_ord.time
+        last_price = self.agent.model.hc_price_history[-1]
+        roll = np.random.binomial(1, p)
+        if (roll == 1) & (wait > t):
+            roll2 = np.random.binomial(1, 0.5)
+            ord_id = (self.agent.id, self.agent.order_count)
+            if roll2 == 1:
+                price = last_price * np.random.normal(1.02, emp_vol)
+                beta = self.lognormal_factor(0.25, 0.2)
+                amt = self.agent.dai * beta / self.agent.model.hc_price
+                order = Order('Bid', price, amt, ctime, ord_id)
+            elif roll2 == 0:
+                price = last_price / np.random.normal(1.02, emp_vol) 
+                beta = self.lognormal_factor(0.25, 0.2)
+                amt = self.agent.hc * beta 
+                order = Order('Offer', price, amt, ctime, ord_id)
+                
+
+
+                
+        
+        
+        
+        
+    def chartist1(self, thr=0.1, per=2880, p=0.5, t=5760, tvol=10):
         '''An example rule for illustration.  For this rule, data will be a list of
         price history of BTC and the buy/sell signal will be a slope in the recent price history.
         Details of this rule are taken from:
@@ -262,7 +300,7 @@ class Rule(object):
         
         Args:
             thr - Threshold price change to trigger signal
-            per - period of time over which to observe for the signal
+            per - Period of time over which to observe for the signal
             p - Probability of placing an order given some conditional
             t - Minimum time to wait between placing orders (time to wait for a new signal)
             tvol - Time period over which the agent calculates an empirical volatility for BTC
@@ -272,7 +310,6 @@ class Rule(object):
             t defaults to 4 days
             '''
             
-        dat = self.data # Assume data is a list of BTC price history
         dat = self.agent.model.btc_price_history
         prices = dat[-per:-1] # Price over the last per time periods
         emp_vol = np.std(dat[-tvol: -1]) # Empirical volatility of BTC over last tvol time periods
