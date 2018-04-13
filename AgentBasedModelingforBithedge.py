@@ -27,7 +27,7 @@ class HCModel(BaseModel):
         self.agents = [] # A list of agents in the model
         self.new_agents = [] # Pre-generated agents to enter the simulation randomly
         self.hc_price = 1 # The current HC price
-        self.hc_price_history = [0]
+        self.hc_price_history = [1]
         self.hc_orders = [] # A list of open orders
         self.hc_bids = [] # Bid orders for HC active at this time-step. Format [(agent_id, order_id), price, amount]
         self.hc_offers = [] # Offer orders for HC active at this time-step. Format [(agent_id, order_id), price, amount]
@@ -39,6 +39,7 @@ class HCModel(BaseModel):
         self.agent_count = 0 # Total number of agents ever created; used to assign agent IDs
         self.tot_hc = 0 # Total number of HC in the simulation
         self.tot_col = 0 # Total amount of collateral in the system (DAI)
+        self.dt = 1 # The time step for model dynamics
  
     
     def set_btc_vol(self, vol):
@@ -56,7 +57,7 @@ class HCModel(BaseModel):
         self.btc_ret = exp_returns
 
 
-    def agent_init_pwrlaw(alpha, nb, nh, maxwb, maxwh, p, rule, agent_list = 'agents'):
+    def agent_init_pwrlaw(self, alpha, nb, nh, maxwb, maxwh, p, rule, agent_list = 'agents'):
         '''Function to initialize the model with nb BTC agents
         and nh HC agents.  Wealth endowments are determined using
         a pair of power law distributions using exponent alpha
@@ -100,7 +101,7 @@ class HCModel(BaseModel):
             raise ValueError('Unrecognized order type. Neither Bid nor Offer')
     
     
-    def btc_update_gbm(self, ret=self.btc_ret, vol=self.btc_vol, dt):
+    def btc_update_gbm(self, ret=self.btc_ret, vol=self.btc_vol, dt=self.dt):
         '''Function for updating the BTC price according to 
         geometric Brownian motion.  Uses Euler-Maruyama method
         for comparison to more complicated update rules for which
@@ -140,8 +141,22 @@ class HCModel(BaseModel):
     
     def liquid_check(self):
         '''Function to check all active CDPs for liquidation. For all 
-        CDPs that meet liquidation condition, send HC bids '''
-
+        CDPs that meet liquidation condition, send HC bids to cover 
+        outstanding debt (plus some cushion)'''
+    
+    def price_clear(self):
+        '''Function to set the HC price based on open orders in the book.
+        Sort the bid/offer orders seperately.'''
+        
+        
+    def time_prop(self):
+        '''Function to propagate time forward one step.'''
+        self.btc_update_gbm()
+        for agent in self.agents:
+            agent.rule()
+        self.liquid_check()
+        self.price_clear()
+        self.return_collat()
     
 
 class BaseAgent(object):
@@ -275,12 +290,12 @@ class Rule(object):
             ord_id = (self.agent.id, self.agent.order_count)
             if roll2 == 1:
                 price = last_price * np.random.normal(1.02, emp_vol)
-                beta = self.lognormal_factor(0.25, 0.2)
+                beta = lognormal_factor(0.25, 0.2)
                 amt = self.agent.dai * beta / self.agent.model.hc_price
                 order = Order('Bid', price, amt, ctime, ord_id)
             elif roll2 == 0:
                 price = last_price / np.random.normal(1.02, emp_vol) 
-                beta = self.lognormal_factor(0.25, 0.2)
+                beta = lognormal_factor(0.25, 0.2)
                 amt = self.agent.hc * beta 
                 order = Order('Offer', price, amt, ctime, ord_id)
                 
@@ -325,7 +340,7 @@ class Rule(object):
         if (slope > thr) & (wait > t) & (roll == 1):
             # Some code to place a buy order (send bid to order book)
             bid = last_price * np.random.normal(1.02, emp_vol) # The following is suggested by Cocco et al.
-            beta = self.lognormal_factor(0.25, 0.2)
+            beta = lognormal_factor(0.25, 0.2)
             amt = self.agent.dai * beta / self.agent.model.hc_price
             order = Order('Bid', bid, amt, ctime, ord_id)
             self.agent.orders.append(order)
@@ -334,14 +349,13 @@ class Rule(object):
         elif (slope < -thr) & (wait > t) & (roll == 1):
             # Some code to place a sell order (send offer to order book)
             offer = last_price / np.random.normal(1.02, emp_vol) 
-            beta = self.lognormal_factor(0.25, 0.2)
+            beta = lognormal_factor(0.25, 0.2)
             amt = self.agent.hc * beta 
             order = Order('Offer', offer, amt, ctime, ord_id)
             self.agent.orders.append(order)
             self.agent.model.submit_order(order)
             self.agent.order_count += 1
-        else:
-            order = None
+
             
       
 
