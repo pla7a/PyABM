@@ -170,6 +170,8 @@ class HCModel(BaseModel):
             best_amount =  best_offer.amount # Amount for the lowest offer price above
 
             # Match order type for CDP liquidation
+
+            # If the order amount isn't large enough to finish debt/collat
             if best_amount < cdp.debt:
                 if cdp.collat > best_amount*best_price:
                     cdp.collat -= best_amount*best_price
@@ -181,27 +183,22 @@ class HCModel(BaseModel):
                     cdp.collat = 0
                     best_offer.amount -= cdp.collat*best_price
 
-
-            elif best_amount > cdp.debt:
+            # If order amount is larger (or equal to) than needed
+            elif best_amount >= cdp.debt:
                 if cdp.collat > cdp.debt*best_price:
                     cdp.collat -= cdp.debt*best_price
                     best_offer.amount -= cdp.debt
                     cdp.debt = 0
+
+                    # If the order has been fulfilled completely then we remove it from order book
+                    if (best_offer.amount == 0):
+                        self.hc_offers.remove(best_offer)
+                        self.hc_orders.remove(best_offer)
                 else:
                     cdp.debt -= cdp.collat/best_price
                     best_offer.amount -= cdp.collat/best_price
                     cdp.collat = 0
 
-            elif best_amount == cdp.debt:
-                if cdp.collat > best_amount*best_price:
-                    cdp.collat -= cdp.debt*best_price
-                    cdp.debt = 0
-                    self.hc_offers.remove(best_offer)
-                    self.hc_orders.remove(best_offer)
-                else:
-                    cdp.debt -= cdp.collat/best_price
-                    best_offer.amount -= cdp.collat/best_price
-                    cdp.collat = 0
 
         cdp.agent.debts.remove(cdp) # Remove the CDP from the list of agents' debts as it has been liquidated
         
