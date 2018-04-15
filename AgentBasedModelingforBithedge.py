@@ -18,7 +18,8 @@ class BaseModel(object):
         
 class HCModel(BaseModel):
     '''Class for simulating the HC market.'''
-    
+    E_count = 0 # Index for order_count of system (assuming 0 indexing)
+
     def __init__(self, btc_price, btc_vol, btc_ret):
         self.btc_price = btc_price # The current BTC price
         self.btc_price_history = [btc_price] # Historical BTC prices
@@ -121,7 +122,6 @@ class HCModel(BaseModel):
         if (dt is None):
             dt = self.dt
 
-        
         w = np.random.normal(0, dt)
         self.btc_price = self.btc_price * (1 + ret * dt +vol *w)
         self.btc_price_history.append(self.btc_price)
@@ -152,7 +152,29 @@ class HCModel(BaseModel):
         '''Function to check all active CDPs for liquidation. For all 
         CDPs that meet liquidation condition, send HC bids to cover 
         outstanding debt (plus some cushion)'''
-    
+
+        debt_updates_rule1() # Update all of the debt owed by each CDP
+
+        # Check if CDP violates liquidation ratio or if the CDP has expired (assuming 7 units of time expiration)
+        for agent in self.agents:
+            for cdp in agent.debts:
+                if (cdp.collat < cdp.debt*CDP.lratio) or ((self.time - cdp.time) >= 7): 
+                    liquidate_cdp(cdp)
+
+
+    def liquidate_cdp(self, cdp):
+        '''Function to liquidate any CDP that is found to violate the liquidity ratio'''
+
+        hc_bid = max(map(lambda x: x[1], self.hc_bid)) # Variable denoting the current max hc_bid
+        order_id = ('E', HCModel.E_count) # Create order ID from the system
+
+        # Price in order might need to be changed if we want instant liquidation (will depend on amount of each offer order)
+        order = Order('Bid', hc_bid, cdp.debt, self.time, order_id)
+        submit_order(order) # Submit the order to the order book
+        HCModel.E_count += 1 # Increment order_count for the system by 1
+        cdp.agent.dai += cdp.collat -(hc_bid*cdp.debt) # Return the remaining collateral to the agent who owned the CDP
+
+
     def price_clear(self):
         '''Function to set the HC price based on open orders in the book.
         Sort the bid/offer orders seperately.'''
@@ -242,13 +264,12 @@ class BTCAgent(BaseAgent):
  
 
 
-
 class Order(object):
     '''Class for bid/offer orders.  Will only be for HC market at 
     first but could be extended.'''
     
     def __init__(self, otype, price, amount, time, id_num):
-        self.otype = otype
+        self.otype = otype # Order types are 'Offer' or 'Bid'
         self.price = price
         self.amount = amount
         self.time = time
@@ -380,8 +401,4 @@ def lognormal_factor(mean, std):
     beta = min(beta, 1)
     return beta
         
-        
-
-
-
         
