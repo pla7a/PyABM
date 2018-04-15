@@ -158,8 +158,7 @@ class HCModel(BaseModel):
         for agent in self.agents:
             for cdp in agent.debts:
                 if (cdp.collat < cdp.debt*CDP.lratio) or ((self.time - cdp.time) >= 7): 
-                    order = Order(otype='Bid', amount=cdp.debt, time=self.time)
-                    liquidate_cdp(order, cdp)
+                    liquidate_cdp(cdp)
 
 
     def liquidate_cdp(self, order, cdp):
@@ -193,7 +192,9 @@ class HCModel(BaseModel):
                 self.hc_orders.remove(best_offer)
 
         cdp.agent.debts.remove(cdp) # Remove the CDP from the list of agents' debts as it has been liquidated
-        cdp.agent.dai += cdp.collat # Return the remaining collateral to the agent who owned the CDP
+        
+        if (cdp.collat > 0):
+            cdp.agent.dai += cdp.collat # Return the remaining collateral to the agent who owned the CDP
 
 
     def price_clear(self):
