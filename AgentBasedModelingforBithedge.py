@@ -18,7 +18,6 @@ class BaseModel(object):
         
 class HCModel(BaseModel):
     '''Class for simulating the HC market.'''
-    E_count = 0 # Index for order_count of system (assuming 0 indexing)
 
     def __init__(self, btc_price, btc_vol, btc_ret):
         self.btc_price = btc_price # The current BTC price
@@ -159,20 +158,42 @@ class HCModel(BaseModel):
         for agent in self.agents:
             for cdp in agent.debts:
                 if (cdp.collat < cdp.debt*CDP.lratio) or ((self.time - cdp.time) >= 7): 
-                    liquidate_cdp(cdp)
+                    order = Order(otype='Bid', amount=cdp.debt, time=self.time)
+                    liquidate_cdp(order, cdp)
 
 
-    def liquidate_cdp(self, cdp):
-        '''Function to liquidate any CDP that is found to violate the liquidity ratio'''
+    def liquidate_cdp(self, order, cdp):
+        ''' Function to create match order type for the CDP liquidation process'''
 
-        hc_bid = max(map(lambda x: x[1], self.hc_bid)) # Variable denoting the current max hc_bid
-        order_id = ('E', HCModel.E_count) # Create order ID from the system
+        while (cdp.debt > 0):
+            best_offer = max(self.hc_offers, key=lambda x: x[1]) # Fetch best current offer order
+            best_price = best_offer[1] # Fetch best current price
+            best_amount =  best_offer[2] # Amount for the lowest offer price above
 
-        # Price in order might need to be changed if we want instant liquidation (will depend on amount of each offer order)
-        order = Order('Bid', hc_bid, cdp.debt, self.time, order_id)
-        submit_order(order) # Submit the order to the order book
-        HCModel.E_count += 1 # Increment order_count for the system by 1
-        cdp.agent.dai += cdp.collat -(hc_bid*cdp.debt) # Return the remaining collateral to the agent who owned the CDP
+            # Match order type for CDP liquidation
+            if best_amount < cdp.debt:
+                cdp.collat -= best_amount*best_price
+                cdp.debt -= best_amount
+                self.hc_offers.remove(best_offer)
+                self.hc_orders.remove(best_offer)
+
+            elif best_amount > cdp.debt:
+                cdp.collat -= cdp.debt*best_price
+                self.hc_offers.remove(best_offer)
+                self.hc_orders.remove(best_offer)
+                best_offer.amount -= cdp.debt
+                self.hc_offers.add(best_offer)
+                self.hc_orders.add(best_offer)
+                cdp.debt = 0
+
+            elif best_amount == cdp.debt:
+                cdp.collat -= cdp.debt*best_price
+                cdp.debt = 0
+                self.hc_offers.remove(best_offer)
+                self.hc_orders.remove(best_offer)
+
+        cdp.agent.debts.remove(cdp) # Remove the CDP from the list of agents' debts as it has been liquidated
+        cdp.agent.dai += cdp.collat # Return the remaining collateral to the agent who owned the CDP
 
 
     def price_clear(self):
@@ -268,13 +289,14 @@ class Order(object):
     '''Class for bid/offer orders.  Will only be for HC market at 
     first but could be extended.'''
     
-    def __init__(self, otype, price, amount, time, id_num):
+    # Price takes default value of None if it is a matched order. id_num takes None when it is a system order.
+    def __init__(self, otype, price=None, amount, time, id_num=None):
         self.otype = otype # Order types are 'Offer' or 'Bid'
         self.price = price
         self.amount = amount
         self.time = time
         self.id = id_num # Format (Agent ID, Order ID)
-        self.filled = False
+        self.filled = False 
 
 class CDP(object):
     '''Class for collateralized debt positions'''
