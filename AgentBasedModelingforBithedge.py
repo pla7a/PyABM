@@ -101,7 +101,7 @@ class HCModel(BaseModel):
             raise ValueError('Unrecognized order type. Neither Bid nor Offer')
     
     
-    def btc_update_gbm(self, ret=self.btc_ret, vol=self.btc_vol, dt=self.dt):
+    def btc_update_gbm(self, ret=None, vol=None, dt=None):
         '''Function for updating the BTC price according to 
         geometric Brownian motion.  Uses Euler-Maruyama method
         for comparison to more complicated update rules for which
@@ -112,6 +112,15 @@ class HCModel(BaseModel):
             vol - yearly volatility of BTC expressed as decimal (float)
             dt -  time increment expressed as fraction of a year (float)
         '''
+
+        # Check if the optional parameters were passed, if not then we resort to the corresponding attributes associated with the instance
+        if (ret is None):
+            ret = self.btc_ret
+        if (vol is None):
+            vol = self.btc_vol
+        if (dt is None):
+            dt = self.dt
+
         
         w = np.random.normal(0, dt)
         self.btc_price = self.btc_price * (1 + ret * dt +vol *w)
