@@ -164,32 +164,44 @@ class HCModel(BaseModel):
     def liquidate_cdp(self, order, cdp):
         ''' Function to create match order type for the CDP liquidation process'''
 
-        while (cdp.debt > 0):
+        while (cdp.debt > 0 and cdp.collat > 0):
             best_offer = max(self.hc_offers, key=lambda x: x[1]) # Fetch best current offer order
-            best_price = best_offer[1] # Fetch best current price
-            best_amount =  best_offer[2] # Amount for the lowest offer price above
+            best_price = best_offer.price # Fetch best current price
+            best_amount =  best_offer.amount # Amount for the lowest offer price above
 
             # Match order type for CDP liquidation
             if best_amount < cdp.debt:
-                cdp.collat -= best_amount*best_price
-                cdp.debt -= best_amount
-                self.hc_offers.remove(best_offer)
-                self.hc_orders.remove(best_offer)
+                if cdp.collat > best_amount*best_price:
+                    cdp.collat -= best_amount*best_price
+                    cdp.debt -= best_amount
+                    self.hc_offers.remove(best_offer)
+                    self.hc_orders.remove(best_offer)
+                else:
+                    cdp.debt -= cdp.collat*best_price
+                    cdp.collat = 0
+                    best_offer.amount -= cdp.collat*best_price
+
 
             elif best_amount > cdp.debt:
-                cdp.collat -= cdp.debt*best_price
-                self.hc_offers.remove(best_offer)
-                self.hc_orders.remove(best_offer)
-                best_offer.amount -= cdp.debt
-                self.hc_offers.add(best_offer)
-                self.hc_orders.add(best_offer)
-                cdp.debt = 0
+                if cdp.collat > cdp.debt*best_price:
+                    cdp.collat -= cdp.debt*best_price
+                    best_offer.amount -= cdp.debt
+                    cdp.debt = 0
+                else:
+                    cdp.debt -= cdp.collat/best_price
+                    best_offer.amount -= cdp.collat/best_price
+                    cdp.collat = 0
 
             elif best_amount == cdp.debt:
-                cdp.collat -= cdp.debt*best_price
-                cdp.debt = 0
-                self.hc_offers.remove(best_offer)
-                self.hc_orders.remove(best_offer)
+                if cdp.collat > best_amount*best_price:
+                    cdp.collat -= cdp.debt*best_price
+                    cdp.debt = 0
+                    self.hc_offers.remove(best_offer)
+                    self.hc_orders.remove(best_offer)
+                else:
+                    cdp.debt -= cdp.collat/best_price
+                    best_offer.amount -= cdp.collat/best_price
+                    cdp.collat = 0
 
         cdp.agent.debts.remove(cdp) # Remove the CDP from the list of agents' debts as it has been liquidated
         
