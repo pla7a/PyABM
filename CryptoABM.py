@@ -299,8 +299,7 @@ class Order(object):
     '''Class for bid/offer orders.  Will only be for HC market at 
     first but could be extended.'''
     
-    # Price takes default value of None if it is a matched order. id_num takes None when it is a system order.
-    def __init__(self, otype, price=None, amount, time, id_num=None):
+    def __init__(self, otype, price, amount, time, id_num):
         self.otype = otype # Order types are 'Offer' or 'Bid'
         self.price = price
         self.amount = amount
