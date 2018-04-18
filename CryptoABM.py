@@ -163,12 +163,12 @@ class HCModel(BaseModel):
 
     def liquidate_cdp(self, order, cdp):
         ''' Function to create match order type for the CDP liquidation process'''
-
+        og_debt = cdp.debt
         while (cdp.debt > 0 and cdp.collat > 0):
             best_offer = max(self.hc_offers, key=lambda x: x[1]) # Fetch best current offer order
             best_price = best_offer.price # Fetch best current price
             best_amount =  best_offer.amount # Amount for the lowest offer price above
-
+        
             # Match order type for CDP liquidation
 
             # If the order amount isn't large enough to finish debt/collat
@@ -199,7 +199,8 @@ class HCModel(BaseModel):
                     best_offer.amount -= cdp.collat/best_price
                     cdp.collat = 0
 
-
+        hc_bought = og_debt - cdp.debt
+        tot_hc -= hc_bought
         cdp.agent.debts.remove(cdp) # Remove the CDP from the list of agents' debts as it has been liquidated
         
         if (cdp.collat > 0):
@@ -209,6 +210,8 @@ class HCModel(BaseModel):
     def price_clear(self):
         '''Function to set the HC price based on open orders in the book.
         Sort the bid/offer orders seperately.'''
+        bid = max(self.hc_bids, key=lambda x:x[1])
+        offer = max(self.hc_offers, key=lambda x:x[1])
         
         
     def time_prop(self):
