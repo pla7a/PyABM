@@ -258,16 +258,13 @@ class HCAgent(BaseAgent):
         self.dai = self.dai - collat
         self.hc += hc_amt
         self.debts.append(cdp) 
+        self.model.hc_tot += hc_amt # Add to total number of hc in circulation
     
     def add_collateral(self, dai):
         '''Function to add collateral in DAI to a particular CDP.'''
         cdp = self.debts[debt_num]
         self.dai = self.dai - dai
         cdp.collat += dai
-    
-    def repay_hc(self, hc_amt):
-        '''Function to repay debts, oldest first, up to a given amount
-        of HC.'''
         
     def repay_debt(self, hc, cdp_id):
         '''Function to repay a particular debt by its index in the debts list.'''
@@ -275,6 +272,7 @@ class HCAgent(BaseAgent):
             if cdp.id == cdp_id:
                 self.hc -= hc
                 cdp.debt -= hc
+                self.model.hc_total -= hc # Reduce total number of hc in circulation
                 if cdp.debt == 0:
                     self.dai += cdp.collat # Return collateral
                     self.debts.remove(cdp) # Remove any cleared debts
