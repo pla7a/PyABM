@@ -49,7 +49,16 @@ class HCModel(BaseModel):
         
         self.btc_vol = vol
 
-        
+    
+    def find_agent(self, agent_id):
+        '''Return agent object associated with given agent id.'''
+        ag = None
+        for agent in self.agents:
+            if agent.id == agent_id:
+                ag = agent
+                break
+        return ag
+    
     def set_btc_returns(self, exp_returns):
         '''Function for setting the expected yearly returns
         of BTC.'''
@@ -210,12 +219,57 @@ class HCModel(BaseModel):
     def price_clear(self):
         '''Function to set the HC price based on open orders in the book.
         Sort the bid/offer orders seperately.'''
+        transactions = []
+        self.hc_bids.sort(key=lambda x:x[2])
+        self.hc_offers.sort(key=lambda x:x[2], reversed=True)
+        best_bid = self.hc_bids[-1][1]
+        best_offer = self.hc_offers[-1][1]
+        while best_offer < best_bid:
+            bid_agentid = self.hc_bids[-1][0][0]
+            bid_agent = self.find_agent(bid_agentid)
+            offer_agentid = self.hc_offers[-1][0][0]
+            offer_agent = self.find_agent(offer_agentid)
+            bid_amt = self.hc_bids[-1][2]
+            offer_amt = self.hc_offers[-1[2]
+            remaining = abs(bid_amt - offer_amt)
+            if bid_amt < offer_amt:
+                
+            elif bid_amt > offer_amt:
+                #stuff
+            elif bid_amt = offer_amt:
+                #stuff
         bid = max(self.hc_bids, key=lambda x:x[1])
         offer = max(self.hc_offers, key=lambda x:x[1])
         
+    
+    def update_agents(self, std):
+        '''Function to update the model's list of active agents.  This
+        function randomly adds or removes agents from the model.  
+        Removed agents are deleted and new agents come from the 
+        new_agents list. The number of agents to be added/removed is chosen
+        by drawing from a normal distribution with mean at the prior 
+        number of total agents.  
         
+        Args: std - standard deviation of the normal dist from which
+        the new agent total is drawn.'''
+        current = len(self.agents)
+        new = int(np.random.normal(current, std))
+        change = new - current
+        if change < 0:
+            idxs = np.random.choice(current, abs(change))
+            for idx in sorted(idxs, reversed=True):
+                del(self.agents[idx])
+        if change > 0:
+            idxs = np.random.choice(len(self.new_agents), change)
+            for idx in sorted(idxs, reversed=True):
+                self.agents.append(self.new_agents[idx])
+                del(self.new_agents[idx])
+            
+
+    
     def time_prop(self):
         '''Function to propagate time forward one step.'''
+        self.update_agents()
         self.btc_update_gbm()
         for agent in self.agents:
             agent.rule()
