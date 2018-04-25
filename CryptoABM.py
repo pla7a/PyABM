@@ -40,6 +40,7 @@ class HCModel(BaseModel):
         self.tot_hc = 0 # Total number of HC in the simulation
         self.tot_col = 0 # Total amount of collateral in the system (DAI)
         self.dt = 1 # The time step for model dynamics
+        self.system_order = -1 # Order index for the system's orders (begins at -1 because we increment on each call)
  
     
     def set_btc_vol(self, vol):
@@ -174,39 +175,46 @@ class HCModel(BaseModel):
         ''' Function to create match order type for the CDP liquidation process'''
         og_debt = cdp.debt
         while (cdp.debt > 0 and cdp.collat > 0):
-            best_offer = max(self.hc_offers, key=lambda x: x[1]) # Fetch best current offer order
-            best_price = best_offer.price # Fetch best current price
-            best_amount =  best_offer.amount # Amount for the lowest offer price above
-        
-            # Match order type for CDP liquidation
-
-            # If the order amount isn't large enough to finish debt/collat
-            if best_amount < cdp.debt:
-                if cdp.collat > best_amount*best_price:
-                    cdp.collat -= best_amount*best_price
-                    cdp.debt -= best_amount
-                    self.hc_offers.remove(best_offer)
-                    self.hc_orders.remove(best_offer)
-                else:
-                    cdp.debt -= cdp.collat*best_price
-                    cdp.collat = 0
-                    best_offer.amount -= cdp.collat*best_price
-
-            # If order amount is larger (or equal to) than needed
-            elif best_amount >= cdp.debt:
-                if cdp.collat > cdp.debt*best_price:
-                    cdp.collat -= cdp.debt*best_price
-                    best_offer.amount -= cdp.debt
-                    cdp.debt = 0
-
-                    # If the order has been fulfilled completely then we remove it from order book
-                    if (best_offer.amount == 0):
+            if (self.hc_offers):
+                best_offer = min(self.hc_offers, key=lambda x: x[1]) # Fetch best current offer order
+                best_price = best_offer.price # Fetch best current price
+                best_amount =  best_offer.amount # Amount for the lowest offer price above
+            
+                # Match order type for CDP liquidation
+                # If the order amount isn't large enough to finish debt/collat
+                if best_amount < cdp.debt:
+                    if cdp.collat > best_amount*best_price:
+                        cdp.collat -= best_amount*best_price
+                        cdp.debt -= best_amount
                         self.hc_offers.remove(best_offer)
                         self.hc_orders.remove(best_offer)
-                else:
-                    cdp.debt -= cdp.collat/best_price
-                    best_offer.amount -= cdp.collat/best_price
-                    cdp.collat = 0
+                    else:
+                        cdp.debt -= cdp.collat*best_price
+                        cdp.collat = 0
+                        best_offer.amount -= cdp.collat*best_price
+
+                # If order amount is larger (or equal to) than needed
+                elif best_amount >= cdp.debt:
+                    if cdp.collat > cdp.debt*best_price:
+                        cdp.collat -= cdp.debt*best_price
+                        best_offer.amount -= cdp.debt
+                        cdp.debt = 0
+
+                        # If the order has been fulfilled completely then we remove it from order book
+                        if (best_offer.amount == 0):
+                            self.hc_offers.remove(best_offer)
+                            self.hc_orders.remove(best_offer)
+                    else:
+                        cdp.debt -= cdp.collat/best_price
+                        best_offer.amount -= cdp.collat/best_price
+                        cdp.collat = 0
+
+            # If the order book is illiquid (and we have ran out of offer orders to purchase) we must create bid orders at 10% above market rate                
+            elif (not self.hc_offers):
+                self.system_order += 1
+                illiquid_order = order(self, "Bid", hc_price*1.1, cdp.collat/(hc_price*1.1), self.time, ('E', self.system_order))
+                submit_order(self, illiquid_order)
+
 
         hc_bought = og_debt - cdp.debt
         tot_hc -= hc_bought
@@ -230,14 +238,14 @@ class HCModel(BaseModel):
             offer_agentid = self.hc_offers[-1][0][0]
             offer_agent = self.find_agent(offer_agentid)
             bid_amt = self.hc_bids[-1][2]
-            offer_amt = self.hc_offers[-1[2]
+            offer_amt = self.hc_offers[-1][2]
             remaining = abs(bid_amt - offer_amt)
             if bid_amt < offer_amt:
-                
+                pass
             elif bid_amt > offer_amt:
-                #stuff
-            elif bid_amt = offer_amt:
-                #stuff
+                pass
+            elif bid_amt == offer_amt:
+                pass
         bid = max(self.hc_bids, key=lambda x:x[1])
         offer = max(self.hc_offers, key=lambda x:x[1])
         
