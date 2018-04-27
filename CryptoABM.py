@@ -19,11 +19,15 @@ class BaseModel(object):
 class HCModel(BaseModel):
     '''Class for simulating the HC market.'''
 
-    def __init__(self, btc_price, btc_vol, btc_ret):
+#    fee_rate = 0.01 # A class variable for the interest rate on CDP debt (won't be used for first approximation simulations)
+
+
+    def __init__(self, btc_price, btc_vol, btc_ret, lratio):
         self.btc_price = btc_price # The current BTC price
         self.btc_price_history = [btc_price] # Historical BTC prices
         self.btc_ret = btc_ret # The expected yearly returns of BTC
         self.btc_vol = btc_vol # The (current) volatility of BTC prices
+        self.lratio = lratio # The liquidation rato for CDPs in the model
         self.agents = [] # A list of agents in the model
         self.new_agents = [] # Pre-generated agents to enter the simulation randomly
         self.hc_price = 1 # The current HC price
@@ -169,11 +173,12 @@ class HCModel(BaseModel):
         # Check if CDP violates liquidation ratio or if the CDP has expired (assuming 7 units of time expiration)
         for agent in self.agents:
             for cdp in agent.debts:
-                if (cdp.collat < cdp.debt*CDP.lratio) or ((self.time - cdp.time) >= self.cdp_expire): 
+                if (cdp.collat < cdp.debt*self.lratio) or ((self.time - cdp.time) >= self.cdp_expire): 
+                    cdp.liq = True
                     liquidate_cdp(cdp)
 
 
-    def liquidate_cdp(self, order, cdp):
+    def liquidate_cdp(self, cdp):
         ''' Function to create match order type for the CDP liquidation process'''
         og_debt = cdp.debt
         while (cdp.debt > 0 and cdp.collat > 0):
@@ -364,26 +369,28 @@ class Order(object):
     '''Class for bid/offer orders.  Will only be for HC market at 
     first but could be extended.'''
     
-    def __init__(self, otype, price, amount, time, id_num):
+    def __init__(self, otype, price, amount, time, id_num, exp_time, exch=True):
         self.otype = otype # Order types are 'Offer' or 'Bid'
         self.price = price
         self.amount = amount
         self.time = time
-        self.id = id_num # Format (Agent ID, Order ID)
-        self.filled = False 
+        self.id = id_num # Format (Agent ID, Order ID) or (cdp.id, Order ID) if self.exch=True
+        self.exp_time = exp_time
+        self.filled = False
+        # self.exch indicates wrather 
 
 class CDP(object):
     '''Class for collateralized debt positions'''
     
-    rate = 0.01 # A class variable for the interest rate on CDP debt (won't be used for first approximation simulations)
-    lratio = 1.3 # A class variable for the liquidation ratio.  When collat < debt * lratio, we liquidate the CDP
     
-    def __init__(self, agent, debt, collateral, creation_time, id_num):
+    def __init__(self, agent, debt, collateral, creation_time, id_num, liq=False):
+        # liq is a boolean to indicate if the CDP is in liquidation (not eligible for agent interaction)
         self.agent = agent # Agent that owns this CDP
         self.debt = debt # Debt in HC to free the collateral in this CDP
         self.collat = collateral # Collateral in DAI that secures this CDP
         self.time = creation_time 
         self.id = id_num # Format (Agent_ID, CDP_ID)
+        
 
 
 class Rule(object):
