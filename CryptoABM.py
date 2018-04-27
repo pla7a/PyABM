@@ -40,6 +40,8 @@ class HCModel(BaseModel):
         self.tot_hc = 0 # Total number of HC in the simulation
         self.tot_col = 0 # Total amount of collateral in the system (DAI)
         self.dt = 1 # The time step for model dynamics
+        self.cdp_contract_expire = 7*self.dt # Expiration time for CDP liquidation
+        self.cdp_order_expire = 1*self.dt # Order expiration for system bids
         self.system_order = -1 # Order index for the system's orders (begins at -1 because we increment on each call)
  
     
@@ -167,7 +169,7 @@ class HCModel(BaseModel):
         # Check if CDP violates liquidation ratio or if the CDP has expired (assuming 7 units of time expiration)
         for agent in self.agents:
             for cdp in agent.debts:
-                if (cdp.collat < cdp.debt*CDP.lratio) or ((self.time - cdp.time) >= 7): 
+                if (cdp.collat < cdp.debt*CDP.lratio) or ((self.time - cdp.time) >= self.cdp_expire): 
                     liquidate_cdp(cdp)
 
 
