@@ -180,9 +180,9 @@ class HCModel(BaseModel):
 
     def liquidate_cdp(self, cdp):
         ''' Function to create match order type for the CDP liquidation process'''
-        cdp_order = order(self, 'Bid', 0, cdp.debt, self.time, (cdp.id, cdp.agent.order_count), ord_exp, exch=True)
+        cdp_order = order(self, 'Bid', 0, cdp.debt, self.time, (cdp.id, cdp.agent.order_count), self.ord_exp, exch=True)
         cdp.agent.order_count++
-        
+
 
     def price_clear(self):
         '''Function to set the HC price based on open orders in the book.
