@@ -33,8 +33,8 @@ class HCModel(BaseModel):
         self.hc_price = 1 # The current HC price
         self.hc_price_history = [1]
         self.hc_orders = [] # A list of open orders
-        self.hc_bids = [] # Bid orders for HC active at this time-step. Format [(agent_id, order_id), price, amount]
-        self.hc_offers = [] # Offer orders for HC active at this time-step. Format [(agent_id, order_id), price, amount]
+        self.hc_bids = [] # Bid orders (in Dai) for HC active at this time-step. Format [(agent_id, order_id), price, amount]
+        self.hc_offers = [] # Offer orders (in HC) for HC active at this time-step. Format [(agent_id, order_id), price, amount]
         self.exchange_dai = 0 # Dai held by the system/exchange
         self.exchange_hc = 0 # HC held by the system/exchange
         self.exchange_cdp = [] # A list of CDPs currently under liquidation (held by exchange)
@@ -192,7 +192,9 @@ class HCModel(BaseModel):
         self.hc_offers.sort(key=lambda x:x[2], reversed=True)
         best_bid = self.hc_bids[-1][1]
         best_offer = self.hc_offers[-1][1]
-        while best_offer < best_bid:
+
+        # Clear the book for none market orders
+        while best_offer =< best_bid:
             bid_agentid = self.hc_bids[-1][0][0]
             bid_agent = self.find_agent(bid_agentid)
             offer_agentid = self.hc_offers[-1][0][0]
@@ -200,12 +202,42 @@ class HCModel(BaseModel):
             bid_amt = self.hc_bids[-1][2]
             offer_amt = self.hc_offers[-1][2]
             remaining = abs(bid_amt - offer_amt)
+
             if bid_amt < offer_amt:
-                pass
+                # Alter balances of agents involved
+                bid_agent.hc += bid_amt*best_offer
+                bid_agent.dai -= bid_amt
+                offer_agent.hc -= bid_amt*best_offer
+                offer_agent.dai += bid_amt
+                # Find amount that wasn't filled
+                offer_amt_ord = offer_amt - bid_amt
+                del self.hc_bids[-1]
+                # Change offer order for unfilled amount  
+                self.hc_offers[-1][2] = offer_amt_ord 
+
             elif bid_amt > offer_amt:
-                pass
+                # Alter balances of agents involved
+                bid_agent.hc += offer_amt*best_offer
+                bid_agent.dai -= offer_amt
+                offer_agent.hc -= offer_amt*best_offer
+                offer_agent.dai += offer_amt
+                # Find amount that wasn't filled
+                bid_amt_ord = bid_amt - offer_amt
+                del self.hc_offers[-1]
+                # Submit new bid order for unfilled amount
+                self.hc_bids[-1][2] = bid_amt_ord                
+
+            # If bid amount = offer amount then we can remove both orders from the order book and credit the agents accordingly
             elif bid_amt == offer_amt:
-                pass
+                # Change balances of agents involved
+                bid_agent.hc += offer_amt*best_offer
+                bid_agent.dai -= offer_amt
+                offer_agent.hc -= offer_amt*best_offer
+                offer_agent.dai += offer_amt
+                # Remove orders from order book
+                del self.hc_bids[-1]
+                del self.hc_offers[-1]
+                
         bid = max(self.hc_bids, key=lambda x:x[1])
         offer = max(self.hc_offers, key=lambda x:x[1])
         
